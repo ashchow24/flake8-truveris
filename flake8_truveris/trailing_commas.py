@@ -1,5 +1,5 @@
 import tokenize
-
+import sys
 
 OPENING_BRACKETS = [
     "[",
@@ -12,6 +12,18 @@ CLOSING_BRACKETS = [
     "}",
     ")",
 ]
+
+x = (1,2,3)
+
+
+def f(*args):
+    pass
+
+
+f(
+    *x
+)
+
 
 # all the Python keywords that could prefix a parenthesis context, where
 # trailing commas are either not allowed, or would change what the context gets
@@ -66,6 +78,8 @@ def eval_context_commas(tokens, context_start_index, layer=1):
     context_end_index = None
     closing_bracket_is_end_of_value = False
     is_comprehension_context = False
+    context_has_splat = False
+    splat_matters = sys.version_info < (3, 0)
     opening_bracket = tokens[context_start_index].string
     context_uses_commas = True
     if opening_bracket == "(":
@@ -95,7 +109,7 @@ def eval_context_commas(tokens, context_start_index, layer=1):
             context_uses_commas = False
 
     index = context_start_index + 1
-    previous_token = tokens[index - 1]
+
     while index < len(tokens):
         t = tokens[index]
         if t.string in OPENING_BRACKETS:
@@ -123,6 +137,24 @@ def eval_context_commas(tokens, context_start_index, layer=1):
             # shouldn't have its commas validated
             is_comprehension_context = True
 
+        if splat_matters and not context_has_splat:
+            if t.string in ("*", "**"):
+                # potential splat usage
+                # grab the first non-whitespace token before the asterisk(s)
+                prev_index = index - 1
+
+                while tokens[prev_index].type in (tokenize.NL, tokenize.NEWLINE):
+                    prev_index -= 1
+
+                previous_non_ws_token = tokens[prev_index]
+
+                splat_prefixes = list(OPENING_BRACKETS)
+                splat_prefixes.append(",")
+
+                if previous_non_ws_token.string in splat_prefixes:
+                    # the current token is definitely a splat operator
+                    context_has_splat = True
+
         if t.string == ",":
             # found a comma, so enforce trailing comma usage
             context_uses_commas = True
@@ -143,9 +175,9 @@ def eval_context_commas(tokens, context_start_index, layer=1):
                             # should not be validating trailing commas in
                             # comprehension context
                             pass
-                        elif previous_token.string in ("*", "**"):
-                            # expansion can't be followed by a trailing
-                            # comma
+                        elif splat_matters and context_has_splat:
+                            # trailing comma can't be used in a context where a
+                            # splat was used.
                             pass
                         else:
                             # should have a trailing comma, but doesn't
@@ -170,7 +202,6 @@ def eval_context_commas(tokens, context_start_index, layer=1):
 
         closing_bracket_is_end_of_value = False
         index += 1
-        previous_token = t
 
     if is_comprehension_context:
         # shouldn't validate commas in this context, so strip the errors
